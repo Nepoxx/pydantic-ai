@@ -47,7 +47,7 @@ from ..usage import RunUsage, UsageLimits
 if TYPE_CHECKING:
     from fasta2a.applications import FastA2A
     from fasta2a.broker import Broker
-    from fasta2a.schema import AgentProvider, Skill
+    from fasta2a.schema import AgentProvider, Skill, TaskSendParams
     from fasta2a.storage import Storage
     from starlette.middleware import Middleware
     from starlette.routing import BaseRoute, Route
@@ -1356,6 +1356,7 @@ class AbstractAgent(Generic[AgentDepsT, OutputDataT], ABC):
         *,
         storage: Storage | None = None,
         broker: Broker | None = None,
+        deps_factory: Callable[[TaskSendParams], AgentDepsT] | Callable[[TaskSendParams], Awaitable[AgentDepsT]] | None = None,
         # Agent card
         name: str | None = None,
         url: str = 'http://localhost:8000',
@@ -1394,6 +1395,7 @@ class AbstractAgent(Generic[AgentDepsT, OutputDataT], ABC):
             self,
             storage=storage,
             broker=broker,
+            deps_factory=deps_factory,
             name=name,
             url=url,
             version=version,

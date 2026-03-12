@@ -1,10 +1,11 @@
 from __future__ import annotations, annotations as _annotations
 
 import base64
+import inspect
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Generic, TypeVar
 
@@ -77,6 +78,7 @@ def agent_to_a2a(
     *,
     storage: Storage | None = None,
     broker: Broker | None = None,
+    deps_factory: Callable[[TaskSendParams], AgentDepsT] | Callable[[TaskSendParams], Awaitable[AgentDepsT]] | None = None,
     # Agent card
     name: str | None = None,
     url: str = 'http://localhost:8000',
@@ -94,7 +96,7 @@ def agent_to_a2a(
     """Create a FastA2A server from an agent."""
     storage = storage or InMemoryStorage()
     broker = broker or InMemoryBroker()
-    worker = AgentWorker(agent=agent, broker=broker, storage=storage)
+    worker = AgentWorker(agent=agent, broker=broker, storage=storage, deps_factory=deps_factory)
 
     lifespan = lifespan or partial(worker_lifespan, worker=worker, agent=agent)
 
@@ -120,6 +122,7 @@ class AgentWorker(Worker[list[ModelMessage]], Generic[WorkerOutputT, AgentDepsT]
     """A worker that uses an agent to execute tasks."""
 
     agent: AbstractAgent[AgentDepsT, WorkerOutputT]
+    deps_factory: Callable[[TaskSendParams], AgentDepsT] | Callable[[TaskSendParams], Awaitable[AgentDepsT]] | None = field(default=None)
 
     async def run_task(self, params: TaskSendParams) -> None:
         task = await self.storage.load_task(params['id'])
@@ -139,8 +142,13 @@ class AgentWorker(Worker[list[ModelMessage]], Generic[WorkerOutputT, AgentDepsT]
         message_history = await self.storage.load_context(task['context_id']) or []
         message_history.extend(self.build_message_history(task.get('history', [])))
 
+        deps: AgentDepsT | None = None
+        if self.deps_factory is not None:
+            deps_result = self.deps_factory(params)
+            deps = await deps_result if inspect.isawaitable(deps_result) else deps_result
+
         try:
-            result = await self.agent.run(message_history=message_history)  # type: ignore
+            result = await self.agent.run(deps=deps, message_history=message_history)  # type: ignore
 
             await self.storage.update_context(task['context_id'], result.all_messages())
 
